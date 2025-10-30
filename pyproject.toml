@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jiten-parser"
+version = "0.1.0"
+description = "A Japanese morphological analyser and parser."
+readme = "README.md"
+requires-python = ">=3.8"
+license = { file = "LICENSE" }
+authors = [
+    { name = "/lmg/ Anon" },
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: Apache-2.0 License",
+    "Operating System :: OS Independent",
+    "Topic :: Text Processing :: Linguistic",
+]
+dependencies = [
+    # wanakana-paison is not on PyPI, so we install it directly from Git
+    "wanakana-paison @ git+https://github.com/lmg-anon/WanaKanaPaison.git",
+]
+
+[project.urls]
+Homepage = "https://github.com/lmg-anon/jiten-parser-py"
+"Bug Tracker" = "https://github.com/lmg-anon/jiten-parser-py/issues"
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+]
+gui = [
+    "PySide6",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+jp_parser = [
+    "resources/*",
+    "jmdict/data/*",
+    "jmdict/data/pitch_accents/*",
+]
