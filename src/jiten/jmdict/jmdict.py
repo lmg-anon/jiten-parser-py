@@ -304,6 +304,14 @@ class JmDict:
         self.conn = sqlite3.connect(self.db_path)
         self.conn.row_factory = sqlite3.Row
         
+        cur = self.conn.cursor()
+        cur.execute("PRAGMA journal_mode=OFF;")
+        cur.execute("PRAGMA synchronous=OFF;")
+        cur.execute("PRAGMA temp_store=MEMORY;")
+        cur.execute("PRAGMA mmap_size=268435456;")
+        cur.execute("PRAGMA cache_size=-200000;")
+        cur.execute("PRAGMA optimize;")
+        
         end_time = time.time()
         word_count = self.conn.execute("SELECT COUNT(*) FROM words").fetchone()[0]
         self._print(f"JMDict ready in {end_time - start_time:.2f} seconds.")
@@ -526,6 +534,164 @@ class JmDict:
         self._word_cache[word_id] = word
         return word
 
+    def get_words_by_id(self, word_ids: List[int]) -> List[JmDictWord]:
+        """
+        Retrieves a list of words and all their details from the database by their ID.
+        """
+        if not word_ids:
+            return []
+        if not self.conn:
+            self.load()
+
+        cursor = self.conn.cursor()
+
+        def needs_full(wid: int) -> bool:
+            # Does this word needs full re-hydratation?
+            w = self._word_cache.get(wid)
+            return (w is None) or (not getattr(w, "definitions", []))
+
+        hydrate_ids = [wid for wid in word_ids if needs_full(wid)]
+        if not hydrate_ids:
+            # All are already fully in cache
+            return [self._word_cache[wid] for wid in word_ids if wid in self._word_cache]
+
+        CHUNK = 800
+
+        present_ids: set[int] = set()
+        for i in range(0, len(hydrate_ids), CHUNK):
+            chunk = hydrate_ids[i:i + CHUNK]
+            ph = ",".join("?" * len(chunk))
+            for row in cursor.execute(f"SELECT word_id, origin FROM words WHERE word_id IN ({ph})", chunk):
+                wid = row["word_id"]
+                present_ids.add(wid)
+                w = self._word_cache.get(wid)
+                if w is None:
+                    w = JmDictWord(word_id=wid, origin=WordOrigin(row["origin"]))
+                    self._word_cache[wid] = w
+                else:
+                    w.origin = WordOrigin(row["origin"])
+
+        if not present_ids:
+            return []
+
+        present_list = list(present_ids)
+
+        for i in range(0, len(present_list), CHUNK):
+            chunk = present_list[i:i + CHUNK]
+            ph = ",".join("?" * len(chunk))
+            for row in cursor.execute(
+                f"""
+                SELECT word_id, reading_text, reading_type
+                FROM readings
+                WHERE word_id IN ({ph})
+                ORDER BY word_id, reading_order
+                """,
+                chunk
+            ):
+                w = self._word_cache.get(row["word_id"])
+                if w is not None:
+                    w.readings.append(row["reading_text"])
+                    w.reading_types.append(JmDictReadingType(row["reading_type"]))
+
+        for i in range(0, len(present_list), CHUNK):
+            chunk = present_list[i:i + CHUNK]
+            ph = ",".join("?" * len(chunk))
+            for row in cursor.execute(
+                f"""
+                SELECT word_id, furigana_text
+                FROM readings_furigana
+                WHERE word_id IN ({ph})
+                ORDER BY word_id, furigana_order
+                """,
+                chunk
+            ):
+                w = self._word_cache.get(row["word_id"])
+                if w is not None:
+                    w.readings_furigana.append(row["furigana_text"])
+
+        for i in range(0, len(present_list), CHUNK):
+            chunk = present_list[i:i + CHUNK]
+            ph = ",".join("?" * len(chunk))
+            for row in cursor.execute(
+                f"SELECT word_id, pos_text FROM parts_of_speech WHERE word_id IN ({ph})",
+                chunk
+            ):
+                w = self._word_cache.get(row["word_id"])
+                if w is not None:
+                    w.parts_of_speech.append(row["pos_text"])
+
+        for i in range(0, len(present_list), CHUNK):
+            chunk = present_list[i:i + CHUNK]
+            ph = ",".join("?" * len(chunk))
+            for row in cursor.execute(
+                f"SELECT word_id, priority_text FROM priorities WHERE word_id IN ({ph})",
+                chunk
+            ):
+                w = self._word_cache.get(row["word_id"])
+                if w is not None:
+                    w.priorities.append(row["priority_text"])
+
+        for i in range(0, len(present_list), CHUNK):
+            chunk = present_list[i:i + CHUNK]
+            ph = ",".join("?" * len(chunk))
+            for row in cursor.execute(
+                f"""
+                SELECT word_id, pitch_value
+                FROM pitch_accents
+                WHERE word_id IN ({ph})
+                ORDER BY word_id, pitch_order
+                """,
+                chunk
+            ):
+                w = self._word_cache.get(row["word_id"])
+                if w is not None:
+                    w.pitch_accents.append(row["pitch_value"])
+
+        def_id_to_def = {}
+        word_id_to_defs: dict[int, list[JmDictDefinition]] = {wid: [] for wid in present_list}
+        for i in range(0, len(present_list), CHUNK):
+            chunk = present_list[i:i + CHUNK]
+            ph = ",".join("?" * len(chunk))
+            def_rows = cursor.execute(
+                f"SELECT * FROM definitions WHERE word_id IN ({ph})",
+                chunk
+            ).fetchall()
+
+            def_ids = []
+            for def_row in def_rows:
+                word_id = def_row["word_id"]
+                definition_id = def_row["definition_id"]
+                d = JmDictDefinition(definition_id=definition_id, word_id=word_id)
+                d.english_meanings = def_row["english_meanings"].split(MEANING_DELIMITER) if def_row["english_meanings"] else []
+                d.dutch_meanings = def_row["dutch_meanings"].split(MEANING_DELIMITER) if def_row["dutch_meanings"] else []
+                d.french_meanings = def_row["french_meanings"].split(MEANING_DELIMITER) if def_row["french_meanings"] else []
+                d.german_meanings = def_row["german_meanings"].split(MEANING_DELIMITER) if def_row["german_meanings"] else []
+                d.spanish_meanings = def_row["spanish_meanings"].split(MEANING_DELIMITER) if def_row["spanish_meanings"] else []
+                d.hungarian_meanings = def_row["hungarian_meanings"].split(MEANING_DELIMITER) if def_row["hungarian_meanings"] else []
+                d.russian_meanings = def_row["russian_meanings"].split(MEANING_DELIMITER) if def_row["russian_meanings"] else []
+                d.slovenian_meanings = def_row["slovenian_meanings"].split(MEANING_DELIMITER) if def_row["slovenian_meanings"] else []
+
+                def_ids.append(definition_id)
+                def_id_to_def[definition_id] = d
+                word_id_to_defs.setdefault(word_id, []).append(d)
+
+            if def_ids:
+                ph_defs = ",".join("?" * len(def_ids))
+                for r in cursor.execute(
+                    f"SELECT definition_id, pos_text FROM definition_pos WHERE definition_id IN ({ph_defs})",
+                    def_ids
+                ):
+                    d = def_id_to_def.get(r["definition_id"])
+                    if d is not None:
+                        d.parts_of_speech.append(r["pos_text"])
+
+        for wid, defs in word_id_to_defs.items():
+            w = self._word_cache.get(wid)
+            if w is not None:
+                w.definitions.extend(defs)
+
+        return [self._word_cache[wid] for wid in word_ids if wid in self._word_cache]
+
     def lookup(self, key: str) -> List[JmDictWord]:
         """
         Looks up a term and returns a list of matching JmDictWord objects.
@@ -535,14 +701,8 @@ class JmDict:
         
         cursor = self.conn.cursor()
         # Use DISTINCT to avoid fetching the same word multiple times if a key matches multiple readings
-        word_id_rows = cursor.execute("SELECT DISTINCT word_id FROM lookups WHERE lookup_key = ?", (key,)).fetchall()
-        
-        results = []
-        for row in word_id_rows:
-            word = self.get_word_by_id(row['word_id'])
-            if word:
-                results.append(word)
-        return results
+        rows = cursor.execute("SELECT DISTINCT word_id FROM lookups WHERE lookup_key = ?", (key,)).fetchall()
+        return self.get_words_by_id([r["word_id"] for r in rows])
 
     def close(self):
         """Closes the database connection."""

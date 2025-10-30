@@ -12,7 +12,6 @@ class Deconjugator:
     Handles the de-conjugation of Japanese words by applying a set of rules.
     """
 
-    # Class-level cache, similar to the static ConcurrentDictionary in C#
     _deconjugation_cache: Dict[str, Set[DeconjugationForm]] = {}
     USE_CACHE: bool = False
 
@@ -22,7 +21,6 @@ class Deconjugator:
         from a JSON file.
         """
         self.rules: List[DeconjugationRule] = []
-        # Cache for virtual rules, keyed by the index of the rule in self.rules
         self._virtual_rules_cache: Dict[int, List[DeconjugationVirtualRule]] = {}
 
         resources_path = os.path.join(os.path.dirname(__file__), "resources", "deconjugator.json")        
@@ -32,7 +30,6 @@ class Deconjugator:
         for i, rule_dict in enumerate(rules_data):
             rule = DeconjugationRule.from_dict(rule_dict)
             self.rules.append(rule)
-            # Pre-cache virtual rules
             self._cache_virtual_rules(rule, i)
 
     def _cache_virtual_rules(self, rule: DeconjugationRule, rule_index: int):

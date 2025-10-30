@@ -47,7 +47,6 @@ def format_parsed_word(parsed_word: DeckWord, jmdict: JmDict):
         print(f"  Could not find JMDict entry for ID: {parsed_word.word_id}")
 
 def print_profile_stats(profiler):
-    print("\n=== PERFORMANCE REPORT ===")
     s = io.StringIO()
     ps = pstats.Stats(profiler, stream=s).sort_stats('cumulative')
     ps.print_stats(20)
