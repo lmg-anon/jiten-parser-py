@@ -282,7 +282,7 @@ class JmDict:
         if source_paths is None:
             source_paths = {
                 'dtd': os.path.join(data_dir, "jmdict_dtd.xml"),
-                'jmdict': os.path.join(data_dir, "JMdict"),
+                'jmdict': os.path.join(data_dir, "JMdict_e"),
                 'furigana': os.path.join(data_dir, "JmdictFurigana.json"),
                 'jmnedict': os.path.join(data_dir, "JMnedict.xml"),
                 'pitch_accent_dir': os.path.join(data_dir, "pitch_accents"),
