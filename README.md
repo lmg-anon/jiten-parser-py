@@ -44,7 +44,12 @@ The repository includes a simple GUI that mimics Jiten's website.
 
 <img width="795" height="629" alt="image" src="https://github.com/user-attachments/assets/56f95fe7-00e8-4e02-ba27-da802e6fe77b" />
 
-To run it:
+To run it, first install the additional dependencies:
+```bash
+pip install "jiten-parser[gui] @ git+https://github.com/lmg-anon/jiten-parser-py.git"
+```
+
+Then run using this command:
 ```bash
 python -m jiten.app.gui
 ```
