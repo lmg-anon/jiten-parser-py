@@ -1,4 +1,6 @@
 import sys
+import html
+import re
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLineEdit, QLabel, QTextBrowser, QFrame
@@ -51,13 +53,9 @@ class DetailsPane(QWidget):
 
         self.conjugation_label = QLabel("")
         self.conjugation_label.setStyleSheet("color: #808080; font-style: italic;")
-        
-        self.reading_label = QLabel("")
-        self.reading_label.setFont(QFont("Meiryo", 12))
-        self.reading_label.setStyleSheet("color: #a9b7c6;")
 
         self.kanji_label = QLabel("")
-        self.kanji_label.setFont(QFont("Meiryo", 36, QFont.Weight.Bold))
+        self.kanji_label.setTextFormat(Qt.TextFormat.RichText)
         self.kanji_label.setStyleSheet("color: #6699cc;")
 
         self.meanings_browser = QTextBrowser()
@@ -66,7 +64,6 @@ class DetailsPane(QWidget):
         """)
 
         layout.addWidget(self.conjugation_label)
-        layout.addWidget(self.reading_label, alignment=Qt.AlignmentFlag.AlignLeft)
         layout.addWidget(self.kanji_label, alignment=Qt.AlignmentFlag.AlignLeft)
         layout.addWidget(self.meanings_browser)
         
@@ -74,7 +71,6 @@ class DetailsPane(QWidget):
 
     def clear(self):
         self.conjugation_label.hide()
-        self.reading_label.setText("")
         self.kanji_label.setText("Select a word to see details")
         self.meanings_browser.setHtml("")
 
@@ -83,49 +79,60 @@ class DetailsPane(QWidget):
             self.clear()
             return
 
-        if parsed_word.conjugations:
-            conj_path = " ; ".join(parsed_word.conjugations)
-            self.conjugation_label.setText(f"(Conjugation: {conj_path})")
+        conjugations = [c for c in parsed_word.conjugations if c and not c.startswith("(")]
+        if conjugations:
+            self.conjugation_label.setText(f"(Conjugation: {' ; '.join(conjugations)})")
             self.conjugation_label.show()
         else:
             self.conjugation_label.hide()
 
         kanji_form = jmdict_word.readings[parsed_word.reading_index]
-        reading_form = ""
+        raw_furi = ""
+        if len(jmdict_word.readings_furigana) > parsed_word.reading_index:
+            raw_furi = jmdict_word.readings_furigana[parsed_word.reading_index]
 
-        # Deconjugate the kanji form ONCE to get its base form safely
-        kanji_decon_set = Parser._deconjugator.deconjugate(kanji_form)
-        base_kanji_form = next(iter(kanji_decon_set)).text if kanji_decon_set else None
+        s_furi = "font-size: 12pt; color: #a9b7c6; text-align: center;"
+        s_kanji = "font-size: 36pt; font-weight: bold; color: #6699cc;"
+        s_empty = "font-size: 12pt;"
 
-        # Now iterate through readings to find a matching base form
-        if base_kanji_form:
-            for r, rt in zip(jmdict_word.readings, jmdict_word.reading_types):
-                if rt.name == 'KANA_READING':
-                    kana_decon_set = Parser._deconjugator.deconjugate(r)
-                    if kana_decon_set:
-                        base_kana_form = next(iter(kana_decon_set)).text
-                        if base_kana_form == base_kanji_form:
-                            reading_form = r  # Found the matching kana reading
-                            break
+        if raw_furi and '[' in raw_furi:
+            pattern = re.compile(r'([\u4e00-\u9fafヶ々]+)\[([^\]]+)\]')
+            td_top = ""
+            td_bot = ""
+            last_pos = 0
+            
+            for match in pattern.finditer(raw_furi):
+                pre = raw_furi[last_pos:match.start()]
+                if pre:
+                    td_top += f"<td style='{s_empty}'></td>"
+                    td_bot += f"<td style='{s_kanji}'>{html.escape(pre)}</td>"
+                
+                td_top += f"<td style='{s_furi}'>{html.escape(match.group(2))}</td>"
+                td_bot += f"<td style='{s_kanji}'>{html.escape(match.group(1))}</td>"
+                last_pos = match.end()
+            
+            if last_pos < len(raw_furi):
+                post = raw_furi[last_pos:]
+                td_top += f"<td style='{s_empty}'></td>"
+                td_bot += f"<td style='{s_kanji}'>{html.escape(post)}</td>"
 
-        # Fallback logic if we didn't find a match or couldn't deconjugate
-        if not reading_form and len(jmdict_word.readings_furigana) > parsed_word.reading_index:
-             reading_form = jmdict_word.readings_furigana[parsed_word.reading_index].replace('[', ' ').replace(']', '')
+            self.kanji_label.setText(f"<table cellspacing='0'><tr>{td_top}</tr><tr>{td_bot}</tr></table>")
+        elif raw_furi and raw_furi != kanji_form:
+            self.kanji_label.setText(f"<table cellspacing='0'><tr><td style='{s_furi}'>{html.escape(raw_furi)}</td></tr><tr><td style='{s_kanji}'>{html.escape(kanji_form)}</td></tr></table>")
+        else:
+            self.kanji_label.setText(f"<span style='{s_kanji}'>{html.escape(kanji_form)}</span>")
 
-        self.reading_label.setText(reading_form)
-        self.kanji_label.setText(kanji_form)
-
-        html = "<b>Meanings</b><br><br>"
+        out_html = "<b>Meanings</b><br><br>"
         for i, definition in enumerate(jmdict_word.definitions):
             if not definition.english_meanings:
                 break
             pos_list = to_human_readable_parts_of_speech(definition.parts_of_speech)
             pos_str = f"<font color='#6a8759'><i>({', '.join(pos_list)})</i></font>" if pos_list else ""
-            html += f"<b>Sense {i+1}</b> {pos_str}"
+            out_html += f"<b>Sense {i+1}</b> {pos_str}"
             for j, meaning in enumerate(definition.english_meanings):
-                html += f"<div>{j+1}. {meaning}</div>"
-            html += "<br><br>"
-        self.meanings_browser.setHtml(html)
+                out_html += f"<div>{j+1}. {html.escape(meaning)}</div>"
+            out_html += "<br><br>"
+        self.meanings_browser.setHtml(out_html)
 
 class MainWindow(QMainWindow):
     def __init__(self, jmdict_instance: JmDict):
@@ -156,7 +163,7 @@ class MainWindow(QMainWindow):
         main_layout.addWidget(self.details_pane, stretch=1)
 
     def process_sentence(self):
-        text = self.input_field.text().strip().replace(" ", "")
+        text = self.input_field.text().replace("\u3000", " ").strip()
         if not text:
             return
 
@@ -167,55 +174,56 @@ class MainWindow(QMainWindow):
 
         sentences_info = Parser._morphological_analyser.parse(text, morphemes_only=False)
 
-        flat = [w for sent in sentences_info for w in sent.words]
-        flat.sort(key=lambda t: (t[1], -t[2]))
+        tokens = [w[0] for sent in sentences_info for w in sent.words]
+        cursor = 0
+        text_len = len(text)
 
-        words_with_pos = []
-        consumed_end = 0
-        for wi, start, length in flat:
-            if start >= consumed_end:
-                words_with_pos.append((wi, start, length))
-                consumed_end = start + length
+        for word_info in tokens:
+            token_text = word_info.text
+            if not token_text.strip(): continue
 
-        processed_words = [
-            Parser._process_word(wi) if wi.part_of_speech else None
-            for (wi, _, _) in words_with_pos
-        ]
+            # 1. Exact match at cursor
+            if cursor < text_len and text.startswith(token_text, cursor):
+                self._add_token(token_text, word_info)
+                cursor += len(token_text)
+            else:
+                # 2. Lookahead (handle skipped spaces/symbols)
+                try:
+                    found_idx = text.find(token_text, cursor, min(text_len, cursor + 20))
+                    if found_idx != -1:
+                        self._add_label(text[cursor:found_idx], None) # Add gap
+                        self._add_token(token_text, word_info)
+                        cursor = found_idx + len(token_text)
+                except ValueError: pass
 
-        current_index = 0
-        for i, (word_info, start_index, length) in enumerate(words_with_pos):
-            if start_index < current_index:
-                continue
+        if cursor < text_len:
+            self._add_label(text[cursor:], None)
 
-            deck_word = processed_words[i]
+        # Auto-select first word
+        first = next((l for l in self.word_labels if l.is_selectable), None)
+        if first: self.on_word_selected(first.deck_word)
 
-            if start_index > current_index:
-                gap_text = text[current_index:start_index]
-                gap_label = WordLabel(gap_text, None)
-                gap_label.setFont(QFont("Meiryo", 14))
-                self.sentence_layout.addWidget(gap_label)
-                self.word_labels.append(gap_label)
+    def _add_token(self, text, word_info):
+        deck_word = None
+        if word_info.part_of_speech:
+            deck_word = Parser._process_word(word_info)
+        
+        # Filter out punctuation/symbols from being clickable
+        ignored = {'BLANK_SPACE', 'SUPPLEMENTARY_SYMBOL', 'PUNCTUATION'}
+        pos_str = str(word_info.part_of_speech).upper() if word_info.part_of_speech else ""
+        
+        if pos_str in ignored:
+            deck_word = None
 
-            word_text = text[start_index:start_index + length]
-            word_label = WordLabel(word_text, deck_word)
-            word_label.setFont(QFont("Meiryo", 14))
-            if deck_word:
-                word_label.wordClicked.connect(self.on_word_selected)
-            self.sentence_layout.addWidget(word_label)
-            self.word_labels.append(word_label)
+        self._add_label(text, deck_word)
 
-            current_index = start_index + length
-
-        if current_index < len(text):
-            trailing_text = text[current_index:]
-            trailing_label = WordLabel(trailing_text, None)
-            trailing_label.setFont(QFont("Meiryo", 14))
-            self.sentence_layout.addWidget(trailing_label)
-            self.word_labels.append(trailing_label)
-
-        first_word = next((w for w in processed_words if w), None)
-        if first_word:
-            self.on_word_selected(first_word)
+    def _add_label(self, text, deck_word):
+        label = WordLabel(text, deck_word)
+        label.setFont(QFont("Meiryo", 14))
+        if deck_word:
+            label.wordClicked.connect(self.on_word_selected)
+        self.sentence_layout.addWidget(label)
+        self.word_labels.append(label)
 
     def on_word_selected(self, parsed_word: DeckWord):
         for label in self.word_labels:
