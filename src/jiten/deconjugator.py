@@ -6,13 +6,19 @@ from .deconjugation_form import DeconjugationForm
 from .deconjugation_rule import DeconjugationRule
 from .deconjugation_virtual_rule import DeconjugationVirtualRule
 
+##########################################################################################################
+# Port note:
+# Unlike the C# code, which uses sets, this code uses lists to make sure the insertion order is preserved.
+# This seems to be necessary to match the C#'s HashSet behavior.
+##########################################################################################################
+
 
 class Deconjugator:
     """
     Handles the de-conjugation of Japanese words by applying a set of rules.
     """
 
-    _deconjugation_cache: Dict[str, Set[DeconjugationForm]] = {}
+    _deconjugation_cache: Dict[str, List[DeconjugationForm]] = {}
     USE_CACHE: bool = False
 
     def __init__(self):
@@ -62,25 +68,25 @@ class Deconjugator:
             ))
         self._virtual_rules_cache[rule_index] = virtual_rules
 
-    def deconjugate(self, text: str) -> Set[DeconjugationForm]:
+    def deconjugate(self, text: str) -> List[DeconjugationForm]:
         """
         Performs de-conjugation on the input text.
 
         It iteratively applies rules to find all possible dictionary forms.
         """
         if self.USE_CACHE and text in self._deconjugation_cache:
-            return set(self._deconjugation_cache[text])
+            return list(self._deconjugation_cache[text])
 
-        processed: Set[DeconjugationForm] = set()
+        processed: Dict[DeconjugationForm, None] = {}
         if not text:
-            return processed
+            return []
 
-        novel: Set[DeconjugationForm] = set()
+        novel: List[DeconjugationForm] = []
         start_form = self._create_initial_form(text)
-        novel.add(start_form)
+        novel.append(start_form)
 
         while novel:
-            new_novel: Set[DeconjugationForm] = set()
+            new_novel: Dict[DeconjugationForm, None] = {}
             
             for form in novel:
                 if self._should_skip_form(form):
@@ -94,15 +100,17 @@ class Deconjugator:
 
                     for f in new_forms:
                         if f not in processed and f not in novel and f not in new_novel:
-                            new_novel.add(f)
+                            new_novel[f] = None
             
-            processed.update(novel)
-            novel = new_novel
+            processed.update({n: None for n in novel})
+            novel = list(new_novel.keys())
 
-        if self.USE_CACHE and len(text) <= 20 and len(processed) < 55 and len(self._deconjugation_cache) < 250000:
-            self._deconjugation_cache[text] = set(processed)
+        result = list(processed.keys())
 
-        return processed
+        if self.USE_CACHE and len(text) <= 20 and len(result) < 55 and len(self._deconjugation_cache) < 250000:
+            self._deconjugation_cache[text] = list(result)
+
+        return result
 
     def _create_initial_form(self, text: str) -> DeconjugationForm:
         """Creates the starting DeconjugationForm for a given text."""
@@ -114,7 +122,7 @@ class Deconjugator:
                 len(form.text) > len(form.original_text) + 10 or
                 len(form.tags) > len(form.original_text) + 6)
 
-    def _apply_rule(self, form: DeconjugationForm, rule: DeconjugationRule, rule_index: int) -> Optional[Set[DeconjugationForm]]:
+    def _apply_rule(self, form: DeconjugationForm, rule: DeconjugationRule, rule_index: int) -> Optional[List[DeconjugationForm]]:
         """
         Dispatcher that applies the correct de-conjugation logic based on the rule type.
         """
@@ -133,7 +141,7 @@ class Deconjugator:
             return self._substitution_deconjugate(form, rule)
         return None
 
-    def _std_rule_deconjugate(self, form: DeconjugationForm, rule: DeconjugationRule, rule_index: int) -> Optional[Set[DeconjugationForm]]:
+    def _std_rule_deconjugate(self, form: DeconjugationForm, rule: DeconjugationRule, rule_index: int) -> Optional[List[DeconjugationForm]]:
         """Applies a standard de-conjugation rule."""
         if not rule.detail and not form.tags:
             return None
@@ -147,19 +155,19 @@ class Deconjugator:
                 detail=rule.detail
             )
             hit = self._std_rule_deconjugate_inner(form, virtual_rule)
-            return {hit} if hit else None
+            return [hit] if hit else None
 
         cached_virtual_rules = self._virtual_rules_cache.get(rule_index)
         if not cached_virtual_rules:
             return None
 
-        collection = set()
+        collection = {}
         for virtual_rule in cached_virtual_rules:
             hit = self._std_rule_deconjugate_inner(form, virtual_rule)
             if hit:
-                collection.add(hit)
+                collection[hit] = None
         
-        return collection if collection else None
+        return list(collection.keys()) if collection else None
 
     def _std_rule_deconjugate_inner(self, form: DeconjugationForm, rule: DeconjugationVirtualRule) -> Optional[DeconjugationForm]:
         """The core logic for applying a standard de-conjugation rule."""
@@ -197,25 +205,25 @@ class Deconjugator:
 
         return DeconjugationForm(new_text, form.original_text, new_tags, new_seen_text, new_process)
 
-    def _substitution_deconjugate(self, form: DeconjugationForm, rule: DeconjugationRule) -> Optional[Set[DeconjugationForm]]:
+    def _substitution_deconjugate(self, form: DeconjugationForm, rule: DeconjugationRule) -> Optional[List[DeconjugationForm]]:
         """Applies a substitution rule."""
         if form.process or not form.text:
             return None
 
         if len(rule.dec_end) == 1:
             hit = self._substitution_inner(form, rule.con_end[0], rule.dec_end[0], rule.detail)
-            return {hit} if hit else None
+            return [hit] if hit else None
 
-        collection = set()
+        collection = {}
         for i in range(len(rule.dec_end)):
             dec_end = rule.dec_end[i] if i < len(rule.dec_end) else rule.dec_end[0]
             con_end = rule.con_end[i] if i < len(rule.con_end) else rule.con_end[0]
             
             ret = self._substitution_inner(form, con_end, dec_end, rule.detail)
             if ret:
-                collection.add(ret)
+                collection[ret] = None
         
-        return collection if collection else None
+        return list(collection.keys()) if collection else None
 
     def _substitution_inner(self, form: DeconjugationForm, con_end: str, dec_end: str, detail: str) -> Optional[DeconjugationForm]:
         """The core logic for applying a substitution."""
@@ -239,19 +247,19 @@ class Deconjugator:
 
         return DeconjugationForm(new_text, form.original_text, new_tags, new_seen_text, new_process)
 
-    def _rewrite_rule_deconjugate(self, form: DeconjugationForm, rule: DeconjugationRule, rule_index: int) -> Optional[Set[DeconjugationForm]]:
+    def _rewrite_rule_deconjugate(self, form: DeconjugationForm, rule: DeconjugationRule, rule_index: int) -> Optional[List[DeconjugationForm]]:
         """Applies a rule only if the form's text exactly matches the conjugated ending."""
         return self._std_rule_deconjugate(form, rule, rule_index) if form.text == rule.con_end[0] else None
 
-    def _only_final_rule_deconjugate(self, form: DeconjugationForm, rule: DeconjugationRule, rule_index: int) -> Optional[Set[DeconjugationForm]]:
+    def _only_final_rule_deconjugate(self, form: DeconjugationForm, rule: DeconjugationRule, rule_index: int) -> Optional[List[DeconjugationForm]]:
         """Applies a rule only if it's the first rule in the chain (no tags yet)."""
         return self._std_rule_deconjugate(form, rule, rule_index) if not form.tags else None
 
-    def _never_final_rule_deconjugate(self, form: DeconjugationForm, rule: DeconjugationRule, rule_index: int) -> Optional[Set[DeconjugationForm]]:
+    def _never_final_rule_deconjugate(self, form: DeconjugationForm, rule: DeconjugationRule, rule_index: int) -> Optional[List[DeconjugationForm]]:
         """Applies a rule only if it's not the first rule in the chain (tags exist)."""
         return self._std_rule_deconjugate(form, rule, rule_index) if form.tags else None
 
-    def _context_rule_deconjugate(self, form: DeconjugationForm, rule: DeconjugationRule, rule_index: int) -> Optional[Set[DeconjugationForm]]:
+    def _context_rule_deconjugate(self, form: DeconjugationForm, rule: DeconjugationRule, rule_index: int) -> Optional[List[DeconjugationForm]]:
         if rule.context_rule == "v1inftrap" and not self._v1_inf_trap_check(form):
             return None
         if rule.context_rule == "saspecial" and not self._sa_special_check(form, rule):
