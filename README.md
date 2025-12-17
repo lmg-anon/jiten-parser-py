@@ -42,7 +42,8 @@ for word in parsed_words:
 
 The repository includes a simple GUI that mimics Jiten's website.
 
-<img width="795" height="629" alt="image" src="https://github.com/user-attachments/assets/56f95fe7-00e8-4e02-ba27-da802e6fe77b" />
+<img width="782" height="584" alt="image" src="https://github.com/user-attachments/assets/58f2703b-7922-4e53-96b2-17067392655a" />
+
 
 To run it, first install the additional dependencies:
 ```bash
